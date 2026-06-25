@@ -126,16 +126,34 @@ async function loadAll(){
     const res=await jsonp(m.sheet);
     if(!res || !res.table || !res.table.rows) throw new Error('Пустой ответ от листа '+m.sheet);
     const rows=res.table.rows.map(r=>(r.c||[]).map(parseCell));
-    // Ожидаем структуру: строка 1 — заголовок месяца, строка 2 — №/ФИО/даты/За месяц/Всего, с 3 строки — люди.
+    // Автоопределяем структуру листа.
+    // Это важно: в Google Sheets после сохранения/редактирования строки и столбцы могут немного сместиться,
+    // поэтому нельзя жёстко считать, что ФИО всегда в B, а день 1 всегда в C.
+    const headerIndex = rows.findIndex(row => (row||[]).some(v => norm(v) === 'фио'));
+    if(headerIndex < 0) throw new Error('Не найдена строка заголовков с ФИО на листе '+m.sheet);
+    const header = rows[headerIndex] || [];
+    const fioCol = header.findIndex(v => norm(v) === 'фио');
+    const dateCols = [];
+    for(let c=0; c<header.length; c++){
+      const raw = String(header[c] ?? '').trim();
+      // Берём число из ячейки заголовка даты: подходит «1», «01», «1\nвс», «1 вс».
+      const match = raw.match(/^(\d{1,2})(?:\D|$)/);
+      if(match){
+        const day = Number(match[1]);
+        if(day >= 1 && day <= m.days) dateCols.push({day, col:c});
+      }
+    }
+    if(fioCol < 0 || dateCols.length === 0) throw new Error('Не найдены ФИО или даты на листе '+m.sheet);
+
     const map={};
-    for(let i=2;i<rows.length;i++){
+    for(let i=headerIndex+1;i<rows.length;i++){
       const row=rows[i]||[];
-      const fio=row[1];
-      if(!fio) continue;
+      const fio=String(row[fioCol]||'').trim();
+      if(!fio || norm(fio)==='фио' || norm(fio)==='итого') continue;
       const entries={};
-      for(let d=1; d<=m.days; d++){
-        const val=row[1+d]; // C is index 2 for day 1
-        if(String(val||'').trim()) entries[d]=String(val).trim();
+      for(const dc of dateCols){
+        const val=String(row[dc.col]||'').trim();
+        if(val) entries[dc.day]=val;
       }
       map[norm(fio)]={fio,entries};
       totals[norm(fio)]=(totals[norm(fio)]||0)+countDuties(entries);
@@ -143,7 +161,7 @@ async function loadAll(){
     all[m.sheet]=map;
   }
   render(all,totals);
-  document.getElementById('notice').textContent='Источник: Google Таблица · данные считаются по заполненным ячейкам под датами.';
+  document.getElementById('notice').textContent='Источник: Google Таблица · данные считаются по заполненным ячейкам под датами · автоопределение ФИО/дат.';
 }
 function render(all,totals){
   const tabs=document.getElementById('tabs');
