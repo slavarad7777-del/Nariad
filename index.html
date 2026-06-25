@@ -286,7 +286,12 @@ td:first-child {
 </div>
 
 
-<script src="config.js"></script>
+<script>
+// Настройки Google Таблицы встроены прямо в файл, чтобы на GitHub не путаться с config.js.
+window.NARAD_SHEET_ID = "1c8VDQ9H01HH75hGDSk-eahzVzCcJyk-lLARWw8ozHtA";
+window.NARAD_SHEET_NAME = "Data";
+window.NARAD_SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1c8VDQ9H01HH75hGDSk-eahzVzCcJyk-lLARWw8ozHtA/export?format=csv&gid=0";
+</script>
 <script>
 const GOOGLE_SHEET_CSV_URL = (window.NARAD_SHEET_CSV_URL || "").trim();
 const GOOGLE_SHEET_ID = (window.NARAD_SHEET_ID || "").trim();
@@ -2464,20 +2469,22 @@ function buildDataFromRows(rows) {
 
 function loadGoogleSheetRowsJsonp() {
   return new Promise((resolve, reject) => {
-    if (!GOOGLE_SHEET_ID) return reject(new Error('не указан Google Sheet ID'));
+    if (!GOOGLE_SHEET_ID) return reject(new Error('нет ID таблицы'));
 
-    const callbackName = 'naradSheetCallback_' + Date.now() + '_' + Math.floor(Math.random() * 100000);
+    const callbackName = '__naradSheetCallback_' + Date.now() + '_' + Math.floor(Math.random() * 100000);
     const script = document.createElement('script');
-    const timeout = setTimeout(() => {
-      cleanup();
-      reject(new Error('Google Таблица не ответила'));
-    }, 12000);
+    let timeoutId;
 
     function cleanup() {
-      clearTimeout(timeout);
-      if (script.parentNode) script.parentNode.removeChild(script);
+      clearTimeout(timeoutId);
       try { delete window[callbackName]; } catch (_) { window[callbackName] = undefined; }
+      if (script.parentNode) script.parentNode.removeChild(script);
     }
+
+    timeoutId = setTimeout(() => {
+      cleanup();
+      reject(new Error('Google Sheets не ответил. Проверьте доступ: Все, у кого есть ссылка → Просмотр'));
+    }, 15000);
 
     window[callbackName] = (json) => {
       cleanup();
@@ -2502,14 +2509,16 @@ function loadGoogleSheetRowsJsonp() {
     };
 
     const tqx = 'out:json;responseHandler:' + callbackName;
+    // Берём лист по имени Data. Так надёжнее, чем gid=0 после сохранения из Excel.
     const url = 'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(GOOGLE_SHEET_ID) +
-      '/gviz/tq?sheet=' + encodeURIComponent(GOOGLE_SHEET_NAME || 'Data') +
-      '&headers=1&tqx=' + encodeURIComponent(tqx) +
+      '/gviz/tq?tqx=' + encodeURIComponent(tqx) +
+      '&headers=1&sheet=' + encodeURIComponent(GOOGLE_SHEET_NAME || 'Data') +
+      '&tq=' + encodeURIComponent('select *') +
       '&cache=' + Date.now();
 
     script.onerror = () => {
       cleanup();
-      reject(new Error('не удалось загрузить скрипт Google Sheets'));
+      reject(new Error('не удалось загрузить Google Sheets. Проверьте доступ к таблице'));
     };
     script.src = url;
     document.head.appendChild(script);
