@@ -114,6 +114,43 @@ function buildSummary(totals){
   html+='</tbody></table></div>';
   return html;
 }
+function parseWideSheet(res, m){
+  if(!res || !res.table || !res.table.rows) return {ok:false, reason:'пустой ответ'};
+  const rows=res.table.rows.map(r=>(r.c||[]).map(parseCell));
+  // Автоопределяем структуру листа.
+  // Ищем строку, где есть ячейка «ФИО», даже если перед таблицей есть название месяца или пустые строки.
+  const headerIndex = rows.findIndex(row => (row||[]).some(v => norm(v) === 'фио'));
+  if(headerIndex < 0) return {ok:false, reason:'не найдена строка ФИО'};
+  const header = rows[headerIndex] || [];
+  const fioCol = header.findIndex(v => norm(v) === 'фио');
+  const dateCols = [];
+  for(let c=0; c<header.length; c++){
+    const raw = String(header[c] ?? '').trim();
+    // Берём число из ячейки заголовка даты: подходит «1», «01», «1\nвс», «1 вс».
+    const match = raw.match(/^(\d{1,2})(?:\D|$)/);
+    if(match){
+      const day = Number(match[1]);
+      if(day >= 1 && day <= m.days) dateCols.push({day, col:c});
+    }
+  }
+  if(fioCol < 0) return {ok:false, reason:'не найдена колонка ФИО'};
+  if(dateCols.length === 0) return {ok:false, reason:'не найдены даты'};
+
+  const map={};
+  for(let i=headerIndex+1;i<rows.length;i++){
+    const row=rows[i]||[];
+    const fio=String(row[fioCol]||'').trim();
+    if(!fio || norm(fio)==='фио' || norm(fio)==='итого' || norm(fio)==='замесяц' || norm(fio)==='всего') continue;
+    const entries={};
+    for(const dc of dateCols){
+      const val=String(row[dc.col]||'').trim();
+      if(val) entries[dc.day]=val;
+    }
+    map[norm(fio)]={fio,entries};
+  }
+  return {ok:true, map};
+}
+
 async function loadAll(){
   if(!SPREADSHEET_ID || SPREADSHEET_ID.includes('PASTE_')){
     document.getElementById('notice').textContent='Нужно вставить ID новой Google Таблицы в index.html.';
@@ -121,47 +158,29 @@ async function loadAll(){
   }
   const all={};
   const totals={};
+  const warnings=[];
   ROSTER.forEach(f=>totals[norm(f)]=0);
-  for(const m of MONTHS){
-    const res=await jsonp(m.sheet);
-    if(!res || !res.table || !res.table.rows) throw new Error('Пустой ответ от листа '+m.sheet);
-    const rows=res.table.rows.map(r=>(r.c||[]).map(parseCell));
-    // Автоопределяем структуру листа.
-    // Это важно: в Google Sheets после сохранения/редактирования строки и столбцы могут немного сместиться,
-    // поэтому нельзя жёстко считать, что ФИО всегда в B, а день 1 всегда в C.
-    const headerIndex = rows.findIndex(row => (row||[]).some(v => norm(v) === 'фио'));
-    if(headerIndex < 0) throw new Error('Не найдена строка заголовков с ФИО на листе '+m.sheet);
-    const header = rows[headerIndex] || [];
-    const fioCol = header.findIndex(v => norm(v) === 'фио');
-    const dateCols = [];
-    for(let c=0; c<header.length; c++){
-      const raw = String(header[c] ?? '').trim();
-      // Берём число из ячейки заголовка даты: подходит «1», «01», «1\nвс», «1 вс».
-      const match = raw.match(/^(\d{1,2})(?:\D|$)/);
-      if(match){
-        const day = Number(match[1]);
-        if(day >= 1 && day <= m.days) dateCols.push({day, col:c});
-      }
-    }
-    if(fioCol < 0 || dateCols.length === 0) throw new Error('Не найдены ФИО или даты на листе '+m.sheet);
 
-    const map={};
-    for(let i=headerIndex+1;i<rows.length;i++){
-      const row=rows[i]||[];
-      const fio=String(row[fioCol]||'').trim();
-      if(!fio || norm(fio)==='фио' || norm(fio)==='итого') continue;
-      const entries={};
-      for(const dc of dateCols){
-        const val=String(row[dc.col]||'').trim();
-        if(val) entries[dc.day]=val;
-      }
-      map[norm(fio)]={fio,entries};
-      totals[norm(fio)]=(totals[norm(fio)]||0)+countDuties(entries);
+  for(const m of MONTHS){
+    all[m.sheet]={};
+    try{
+      const res=await jsonp(m.sheet);
+      const parsed=parseWideSheet(res,m);
+      if(!parsed.ok){ warnings.push(`${m.sheet}: ${parsed.reason}`); continue; }
+      all[m.sheet]=parsed.map;
+      Object.values(parsed.map).forEach(r=>{
+        totals[norm(r.fio)] = (totals[norm(r.fio)] || 0) + countDuties(r.entries);
+      });
+    } catch(e){
+      warnings.push(`${m.sheet}: ${e.message}`);
+      continue;
     }
-    all[m.sheet]=map;
   }
+
   render(all,totals);
-  document.getElementById('notice').textContent='Источник: Google Таблица · данные считаются по заполненным ячейкам под датами · автоопределение ФИО/дат.';
+  const loaded = MONTHS.length - warnings.length;
+  const warnText = warnings.length ? ` · пропущено листов: ${warnings.length} (${warnings.slice(0,3).join('; ')}${warnings.length>3?'...':''})` : '';
+  document.getElementById('notice').textContent=`Источник: Google Таблица · загружено листов: ${loaded}/${MONTHS.length} · данные считаются по заполненным ячейкам под датами${warnText}`;
 }
 function render(all,totals){
   const tabs=document.getElementById('tabs');
@@ -187,7 +206,7 @@ function updateFooter(id,all,totals){
 }
 loadAll().catch(e=>{
   console.error(e);
-  document.getElementById('notice').textContent='Ошибка загрузки Google Таблицы: '+e.message+' · проверьте доступ «Все, у кого есть ссылка — просмотр» и правильный ID.';
+  document.getElementById('notice').textContent='Критическая ошибка сайта: '+e.message+' · проверьте доступ «Все, у кого есть ссылка — просмотр» и правильный ID.';
 });
 </script>
 </body>
