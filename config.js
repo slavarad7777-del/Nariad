@@ -1,4 +1,3 @@
-// CSV-ссылка на Google Таблицу.
-// Если сайт не загрузит данные, убедитесь, что доступ: Все, у кого есть ссылка → Просмотр,
-// и что файл сохранён как Google Таблица, а не только как Excel.
-window.NARAD_SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1ddX72RTKnYTqhQPRxKcOYUzrAomzDlw_/export?format=csv&gid=0";
+// Ссылка на Google Таблицу в формате CSV.
+// Если меняете таблицу — замените только эту строку.
+window.NARAD_SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1c8VDQ9H01HH75hGDSk-eahzVzCcJyk-lLARWw8ozHtA/export?format=csv&gid=0";
