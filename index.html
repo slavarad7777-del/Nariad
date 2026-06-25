@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>График нарядов — 9 группа</title>
+<!-- auto-totals-fix-2026-06-25 -->
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
 
@@ -2419,7 +2420,6 @@ function parseCsv(text) {
 
 function buildDataFromRows(rows) {
   const rosterSet = new Set();
-  const totals = {};
   const monthsMap = new Map();
   const data = {};
 
@@ -2430,7 +2430,6 @@ function buildDataFromRows(rows) {
     const monthNum = Number(r.month_num || r.monthnum || r['номер_месяца'] || r['номер месяца']);
     const day = Number(r.day || r['день']);
     const type = normalizeText(r.type || r['тип'] || r['наряд']);
-    const totalRaw = normalizeText(r.total || r['всего']);
     if (!fio || !year || !month || !monthNum) return;
 
     rosterSet.add(fio);
@@ -2439,7 +2438,6 @@ function buildDataFromRows(rows) {
     if (!data[monthKey]) data[monthKey] = {};
     if (!data[monthKey][fio]) data[monthKey][fio] = { fio, entries: [], month_total: 0 };
     if (day && type) data[monthKey][fio].entries.push({ day, type });
-    if (totalRaw !== '' && !Number.isNaN(Number(totalRaw))) totals[fio] = Number(totalRaw);
   });
 
   const months = Array.from(monthsMap.values()).sort((a,b) => (a.year - b.year) || (a.num - b.num));
@@ -2454,14 +2452,15 @@ function buildDataFromRows(rows) {
     });
   });
 
+  // Важно: общий итог теперь ВСЕГДА считается автоматически по строкам Google Таблицы.
+  // Колонка total/всего в Google Таблице больше не фиксирует значение и не мешает обновлениям.
+  const totals = {};
   roster.forEach(fio => {
-    if (!(fio in totals)) {
-      totals[fio] = months.reduce((sum, m) => {
-        const key = `${m.name}_${m.year}`;
-        const p = finalData[key]?.find(x => x.fio === fio);
-        return sum + (p?.month_total || 0);
-      }, 0);
-    }
+    totals[fio] = months.reduce((sum, m) => {
+      const key = `${m.name}_${m.year}`;
+      const p = finalData[key]?.find(x => x.fio === fio);
+      return sum + (p?.month_total || 0);
+    }, 0);
   });
 
   return { roster, months, data: finalData, totals };
